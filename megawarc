@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 megawarc is useful if you have .tar full of .warc.gz files and
 you really want one big .warc.gz. With megawarc you get your
@@ -121,7 +121,7 @@ def copy_to_stream(stream, input_filename, offset, size, verbose=False):
     progress = None
 
   try:
-    with open(input_filename, "r") as f:
+    with open(input_filename, "rb") as f:
       f.seek(offset)
 
       to_read = size
@@ -207,8 +207,8 @@ class CopyReader(object):
 
 
 def read_metadata(stream, metadata):
-  split_s = "\n" + "\r\n" * 2
-  record = ""
+  split_s = b"\n" + b"\r\n" * 2
+  record = b""
   while True:
     read = stream.read(4096)
     if len(read) == 0:
@@ -218,12 +218,12 @@ def read_metadata(stream, metadata):
       record = record.split(split_s)[0]
       break
   record = [s.strip() for s in record.splitlines()]
-  if len(record) > 1 and record[1].lower() == 'warc-type: warcinfo':
+  if len(record) > 1 and record[1].lower() == b'warc-type: warcinfo':
     for line in record:
-      if line.startswith('x-wget-at-'):
-        key, value = line.split('-', 3)[-1].split(':', 1)
-        key = key.lower().strip().replace('-', '_')
-        value = value.strip()
+      if line.startswith(b'x-wget-at-'):
+        key, value = line.split(b'-', 3)[-1].split(b':', 1)
+        key = key.lower().strip().replace(b'-', b'_').decode("utf-8")
+        value = value.strip().decode("utf-8")
         if key not in metadata:
           metadata[key] = []
         metadata[key].append(value)
@@ -237,7 +237,7 @@ def test_gz(filename, offset, size, verbose=False, copy_to_file=None,
             dict_file=None, read_stdout=True):
   size_orig = size
   d_wget_at = {}
-  with open(filename, "r") as f_stream:
+  with open(filename, "rb") as f_stream:
     f = RangeFile(f_stream, offset, size)
     if verbose and size > 10 * 1024 * 1024:
       progress = ProgressInfo(-size)
@@ -247,49 +247,48 @@ def test_gz(filename, offset, size, verbose=False, copy_to_file=None,
       f = CopyReader(f, copy_to_file)
       start_pos = copy_to_file.tell()
     try:
-      with open("/dev/null", "w") as dev_null:
-        if filename.endswith('.gz'):
-          gz = subprocess.Popen(
-            ["gunzip"] + (["-tv"] if not read_stdout else []),
-            shell=False,
-            stdin=subprocess.PIPE,
-            stdout=dev_null if not read_stdout else subprocess.PIPE,
-            stderr=dev_null
-          )
-        if filename.endswith('.zst'):
-          gz = subprocess.Popen(
-            ["zstd", "-d"]
-              + (["-D", dict_file.name] if dict_file else [])
-              + (["--test"] if not read_stdout else []),
-            shell=False,
-            stdin=subprocess.PIPE,
-            stdout=dev_null if not read_stdout else subprocess.PIPE,
-            stderr=dev_null
-          )
-        if read_stdout:
-          thread = threading.Thread(
-            target=read_metadata,
-            args=(gz.stdout, d_wget_at)
-          )
-          thread.daemon = True
-          thread.start()
-        while True:
-          buf = f.read(4096)
-          size -= len(buf)
-          if progress:
-            progress.update(-size)
-          if len(buf) > 0:
-            gz.stdin.write(buf)
-          else:
-            break
-        gz.stdin.close()
-        ret = gz.wait()
-        if read_stdout:
-          thread.join()
-        if ret != 0:
-          raise IOError("Could not decompress warc.gz, returned %d." % ret)
+      if filename.endswith('.gz'):
+        gz = subprocess.Popen(
+          ["gunzip"] + (["-tv"] if not read_stdout else []),
+          shell=False,
+          stdin=subprocess.PIPE,
+          stdout=subprocess.DEVNULL if not read_stdout else subprocess.PIPE,
+          stderr=subprocess.DEVNULL
+        )
+      if filename.endswith('.zst'):
+        gz = subprocess.Popen(
+          ["zstd", "-d"]
+            + (["-D", dict_file.name] if dict_file else [])
+            + (["--test"] if not read_stdout else []),
+          shell=False,
+          stdin=subprocess.PIPE,
+          stdout=subprocess.DEVNULL if not read_stdout else subprocess.PIPE,
+          stderr=subprocess.DEVNULL
+        )
+      if read_stdout:
+        thread = threading.Thread(
+          target=read_metadata,
+          args=(gz.stdout, d_wget_at)
+        )
+        thread.daemon = True
+        thread.start()
+      while True:
+        buf = f.read(4096)
+        size -= len(buf)
         if progress:
-          progress.clear()
+          progress.update(-size)
+        if len(buf) > 0:
+          gz.stdin.write(buf)
+        else:
+          break
+      gz.stdin.close()
+      ret = gz.wait()
+      if read_stdout:
+        thread.join()
+      if ret != 0:
+        raise IOError("Could not decompress warc.gz, returned %d." % ret)
+      if progress:
+        progress.clear()
     except (IOError, OSError) as e:
       if progress:
         progress.clear()
@@ -384,8 +383,9 @@ class MegawarcBuilder(object):
     d = OrderedDict()
     d["target"] = d_target
     d["src_offsets"] = d_src_offsets
-    d["header_fields"] = entry.get_info("utf-8", {})
-    d["header_base64"] = base64.b64encode(tar_header)
+    d["header_fields"] = entry.get_info()
+    d["header_fields"]["type"] = d["header_fields"]["type"].decode("utf-8")
+    d["header_base64"] = base64.b64encode(tar_header).decode("utf-8")
 
     # store metadata
     json.dump(d, json_out, separators=(',', ':'))
@@ -448,15 +448,13 @@ class MegawarcPacker(object):
 
   def process(self, filelist):
     try:
-      def each_file(arg, dirname, names):
-        for n in names:
-          n = os.path.join(dirname, n)
-          if os.path.isfile(n):
-            self.process_file(n)
-
       for filename in filelist:
         if os.path.isdir(filename):
-          os.path.walk(filename, each_file, None)
+          for dirname, _, names in os.walk(filename):
+            for n in names:
+              n = os.path.join(dirname, n)
+              if os.path.isfile(n):
+                self.process_file(n)
         elif os.path.isfile(filename):
           self.process_file(filename)
 
@@ -466,7 +464,7 @@ class MegawarcPacker(object):
           if f["file"].name.endswith('.tar'):
             padding = (tarfile.RECORDSIZE - f["file"].tell()) % tarfile.RECORDSIZE
             if padding > 0:
-              f["file"].write("\0" * padding)
+              f["file"].write(b"\0" * padding)
           f["file"].close()
 
   def process_file(self, filename):
@@ -583,7 +581,7 @@ class MegawarcPacker(object):
       copy_to_stream(tar_out["file"], filename, 0, entry.size)
       padding = (tarfile.BLOCKSIZE - entry.size) % tarfile.BLOCKSIZE
       if padding > 0:
-        tar_out["file"].write("\0" * padding)
+        tar_out["file"].write(b"\0" * padding)
 
       d_target["container"] = "tar"
       d_target["offset"] = tar_offset
@@ -593,13 +591,15 @@ class MegawarcPacker(object):
     d = OrderedDict()
     d["target"] = d_target
     d["src_offsets"] = d_src_offsets
-    d["header_fields"] = entry.get_info("utf-8", {})
-    d["header_base64"] = base64.b64encode(tar_header)
+    d["header_fields"] = entry.get_info()
+    d["header_fields"]["type"] = d["header_fields"]["type"].decode("utf-8")
+    d["header_base64"] = base64.b64encode(tar_header).decode("utf-8")
     d["wget_at"] = d_wget_at
 
     # store metadata
-    json.dump(d, json_out, separators=(',', ':'))
-    json_out.write("\n")
+    json_data = json.dumps(d, separators=(',', ':'))
+    json_out.write(json_data.encode("utf-8"))
+    json_out.write(b"\n")
 
 
 # recreate the original .tar from a megawarc tar+warc+json
