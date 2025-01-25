@@ -75,10 +75,7 @@ import threading
 import time
 
 from optparse import OptionParser
-try:
-  from collections import OrderedDict
-except ImportError:
-  from ordereddict import OrderedDict
+from collections import OrderedDict
 
 import requests
 import zstandard
@@ -464,8 +461,8 @@ class MegawarcPacker(object):
           self.process_file(filename)
 
     finally:
-      for data in list(self.megawarcs.values()):
-        for f in list(data.values()):
+      for data in self.megawarcs.values():
+        for f in data.values():
           if f["file"].name.endswith('.tar'):
             padding = (tarfile.RECORDSIZE - f["file"].tell()) % tarfile.RECORDSIZE
             if padding > 0:

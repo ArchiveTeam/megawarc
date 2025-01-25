@@ -13,17 +13,11 @@ import base64
 import gzip
 import json
 import os.path
-import re
 import subprocess
 import sys
 import tarfile
-import zlib
 
-from optparse import OptionParser
-try:
-  from collections import OrderedDict
-except ImportError:
-  from ordereddict import OrderedDict
+from collections import OrderedDict
 
 # modify tarfile.TarInfo to keep the original tar headers
 tarfile.TarInfo.orig_frombuf = tarfile.TarInfo.frombuf
