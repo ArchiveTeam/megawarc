@@ -1,1 +1,5 @@
 *~
+.coverage*
+.idea
+test_data/
+coverage.xml
