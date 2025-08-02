@@ -1,4 +1,6 @@
 pass() {
+    echo ==========
+    echo "Running and expecting success: $@"
     "$@"
     if [ $? -ne 0 ]; then
         echo "Command failed: $@"
@@ -6,6 +8,8 @@ pass() {
     fi
 }
 fail() {
+    echo ==========
+    echo "Running and expecting failure: $@"
     "$@"
     if [ $? -eq 0 ]; then
         echo "Command succeeded when it should have failed: $@"
@@ -13,6 +17,8 @@ fail() {
     fi
 }
 compare_json() {
+    echo ==========
+    echo "Comparing $1 and $2"
     python3 test_compare_json.py $1 $2
     if [ $? -ne 0 ]; then
         echo "JSON Comparison failed"
