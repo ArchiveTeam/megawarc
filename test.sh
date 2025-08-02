@@ -36,7 +36,7 @@ pass python3-coverage run -p ./megawarc --verbose pack --server https://legacy-a
 # gzip header includes timestamp, so hashes won't match compressed
 pass gzip -d -f test_data/result/zstd_valid.1743749844.megawarc.json.gz
 compare_json test_data/result_expected/zstd_valid.1743749844.megawarc.json test_data/result/zstd_valid.1743749844.megawarc.json
-# extract rejected files to check their hashes
+# extract rejected files to check their hashes since the .tar header is not reproducible
 pass tar xvf test_data/result/zstd_valid.1743749844.megawarc.tar -C test_data/result/
 pass sha256sum -c test_data/result_expected/checksums_zstd_valid.txt
 
@@ -45,7 +45,7 @@ pass python3-coverage run -p ./megawarc --verbose pack --server https://legacy-a
 # gzip header includes timestamp, so hashes won't match compressed
 pass gzip -d -k -f test_data/result/gz_valid.megawarc.json.gz
 compare_json test_data/result_expected/gz_valid.megawarc.json test_data/result/gz_valid.megawarc.json
-# extract rejected files to check their hashes
+# extract rejected files to check their hashes since the .tar header is not reproducible
 pass tar xvf test_data/result/gz_valid.megawarc.tar -C test_data/result/
 pass sha256sum -c test_data/result_expected/checksums_gz_valid.txt
 
