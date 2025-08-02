@@ -27,18 +27,18 @@ compare_json() {
 }
 
 ## cleanup
-python3-coverage combine
-python3-coverage erase
+python3 -m coverage combine
+python3 -m coverage erase
 rm -rf test_data/
 tar xvf test_data.tar
 mkdir test_data/result
 
 ## common failures
-fail python3-coverage run -p ./megawarc
-fail python3-coverage run -p ./megawarc --verbose pack --server https://legacy-api.arpa.li/dictionary test_data/result/zstd_bad_name test_data/pack/zstd_bad_name/bad_name.warc.zst
+fail python3 -m coverage run -p ./megawarc
+fail python3 -m coverage run -p ./megawarc --verbose pack --server https://legacy-api.arpa.li/dictionary test_data/result/zstd_bad_name test_data/pack/zstd_bad_name/bad_name.warc.zst
 
 ## pack zst
-pass python3-coverage run -p ./megawarc --verbose pack --server https://legacy-api.arpa.li/dictionary test_data/result/zstd_valid test_data/pack/zstd_valid/
+pass python3 -m coverage run -p ./megawarc --verbose pack --server https://legacy-api.arpa.li/dictionary test_data/result/zstd_valid test_data/pack/zstd_valid/
 # gzip header includes timestamp, so hashes won't match compressed
 pass gzip -d -f test_data/result/zstd_valid.1743749844.megawarc.json.gz
 compare_json test_data/result_expected/zstd_valid.1743749844.megawarc.json test_data/result/zstd_valid.1743749844.megawarc.json
@@ -47,7 +47,7 @@ pass tar xvf test_data/result/zstd_valid.1743749844.megawarc.tar -C test_data/re
 pass sha256sum -c test_data/result_expected/checksums_zstd_valid.txt
 
 ## pack gzip
-pass python3-coverage run -p ./megawarc --verbose pack --server https://legacy-api.arpa.li/dictionary test_data/result/gz_valid test_data/pack/gz_valid/
+pass python3 -m coverage run -p ./megawarc --verbose pack --server https://legacy-api.arpa.li/dictionary test_data/result/gz_valid test_data/pack/gz_valid/
 # gzip header includes timestamp, so hashes won't match compressed
 pass gzip -d -k -f test_data/result/gz_valid.megawarc.json.gz
 compare_json test_data/result_expected/gz_valid.megawarc.json test_data/result/gz_valid.megawarc.json
@@ -56,13 +56,13 @@ pass tar xvf test_data/result/gz_valid.megawarc.tar -C test_data/result/
 pass sha256sum -c test_data/result_expected/checksums_gz_valid.txt
 
 ## restore gzip
-pass python3-coverage run -p ./megawarc --verbose restore test_data/result/gz_valid
+pass python3 -m coverage run -p ./megawarc --verbose restore test_data/result/gz_valid
 pass tar xvf test_data/result/gz_valid -C test_data/result/
 pass sha256sum -c test_data/result_expected/checksum_gzip_valid_restore.txt
 
 # convert back
 rm test_data/result/gz_valid.megawarc*
-pass python3-coverage run -p ./megawarc --verbose convert test_data/result/gz_valid
+pass python3 -m coverage run -p ./megawarc --verbose convert test_data/result/gz_valid
 # gzip header includes timestamp, so hashes won't match compressed
 pass gzip -d -k -f test_data/result/gz_valid.megawarc.json.gz
 compare_json test_data/result_expected/gz_valid_rebuilt.megawarc.json test_data/result/gz_valid.megawarc.json
@@ -70,5 +70,5 @@ compare_json test_data/result_expected/gz_valid_rebuilt.megawarc.json test_data/
 pass tar xvf test_data/result/gz_valid.megawarc.tar -C test_data/result/
 pass sha256sum -c test_data/result_expected/checksums_gz_valid.txt
 
-python3-coverage combine
-python3-coverage xml
+python3 -m coverage combine
+python3 -m coverage xml
