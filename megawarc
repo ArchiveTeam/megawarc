@@ -441,6 +441,7 @@ def init_zst_megawarc(out, project, dict_id, dict_server):
 class MegawarcPacker(object):
   def __init__(self, output_basename):
     self.verbose = False
+    self.deterministic = False
     self.dict_server = None
     self.dictionary_server = None
     self.output_basename = output_basename
@@ -455,6 +456,8 @@ class MegawarcPacker(object):
       for filename in filelist:
         if os.path.isdir(filename):
           for dirname, _, names in os.walk(filename):
+            if self.deterministic:
+                names = sorted(names)
             for n in names:
               n = os.path.join(dirname, n)
               if os.path.isfile(n):
@@ -675,6 +678,9 @@ Use  %prog restore FILE  to reconstruct original tar.
   parser.add_option("-v", "--verbose", dest="verbose",
                     action="store_true",
                     help="print status messages", default=False)
+  parser.add_option("--deterministic", dest="deterministic",
+                    action="store_true",
+                    help="Sorts file listing of directories before adding so files are processed in the same order", default=False)
   parser.add_option("-s", "--server", dest="server", type=str,
                     help="server for ZST dictionaries", default=None)
   (options, args) = parser.parse_args()
@@ -702,6 +708,7 @@ Use  %prog restore FILE  to reconstruct original tar.
     try:
       mwb = MegawarcPacker(args[1])
       mwb.verbose = options.verbose
+      mwb.deterministic = options.deterministic
       mwb.dict_server = options.server
       mwb.process(args[2:])
     except:
