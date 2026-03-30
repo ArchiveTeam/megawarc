@@ -1,4 +1,4 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 """
 megawarc is useful if you have .tar full of .warc.gz files and
 you really want one big .warc.gz. With megawarc you get your
@@ -75,10 +75,7 @@ import threading
 import time
 
 from optparse import OptionParser
-try:
-  from collections import OrderedDict
-except ImportError:
-  from ordereddict import OrderedDict
+from collections import OrderedDict
 
 import requests
 import zstandard
@@ -107,7 +104,7 @@ class ProgressInfo(object):
     percentage = max(0, min(100, percentage))
     if self._previous_percentage != percentage:
       self._previous_percentage = percentage
-      sys.stderr.write("\r %3d%%" % percentage)
+      sys.stderr.write(f"\r {percentage:3d}%")
 
   def clear(self):
     if self._active:
@@ -124,7 +121,7 @@ def copy_to_stream(stream, input_filename, offset, size, verbose=False):
     progress = None
 
   try:
-    with open(input_filename, "r") as f:
+    with open(input_filename, "rb") as f:
       f.seek(offset)
 
       to_read = size
@@ -133,7 +130,7 @@ def copy_to_stream(stream, input_filename, offset, size, verbose=False):
         buf = f.read(buf_size)
         l = len(buf)
         if l < buf_size:
-          raise Exception("End of file: %d bytes expected, but %d bytes read." % (buf_size, l))
+          raise Exception(f"End of file: {buf_size:d} bytes expected, but {l:d} bytes read.")
         stream.write(buf)
         to_read -= l
         if progress:
@@ -166,9 +163,9 @@ class RangeFile(object):
     elif whence == os.SEEK_END:
       self._current_rel_offset = self._size + pos
     else:
-      raise Exception("Unknown whence: %d." % whence)
+      raise Exception(f"Unknown whence: {whence:d}.")
     if self._current_rel_offset < 0 or self._current_rel_offset > self._size:
-      raise Exception("Seek outside file: %d." % self._current_rel_offset)
+      raise Exception(f"Seek outside file: {self._current_rel_offset:d}.")
     self._stream.seek(self._offset + self._current_rel_offset)
 
   def read(self, size):
@@ -176,7 +173,7 @@ class RangeFile(object):
     self._current_rel_offset += size
     buf = self._stream.read(size)
     if len(buf) < size:
-      raise Exception("Expected to read %d but received %d." % (size, len(buf)))
+      raise Exception(f"Expected to read {size:d} but received {len(buf):d}.")
     return buf
 
 # copies while reading
@@ -195,7 +192,7 @@ class CopyReader(object):
   def read(self, size):
     pos = self.tell()
     if self._last_read < pos:
-      raise Exception("Last read: %d   Current pos: %d" % (self._last_read, pos))
+      raise Exception(f"Last read: {self._last_read:d}   Current pos: {pos:d}")
     buf = self._in_stream.read(size)
     read_before = self._last_read - pos
     if read_before == 0:
@@ -210,8 +207,8 @@ class CopyReader(object):
 
 
 def read_metadata(stream, metadata):
-  split_s = "\n" + "\r\n" * 2
-  record = ""
+  split_s = b"\n" + b"\r\n" * 2
+  record = b""
   while True:
     read = stream.read(4096)
     if len(read) == 0:
@@ -221,12 +218,12 @@ def read_metadata(stream, metadata):
       record = record.split(split_s)[0]
       break
   record = [s.strip() for s in record.splitlines()]
-  if len(record) > 1 and record[1].lower() == 'warc-type: warcinfo':
+  if len(record) > 1 and record[1].lower() == b'warc-type: warcinfo':
     for line in record:
-      if line.startswith('x-wget-at-'):
-        key, value = line.split('-', 3)[-1].split(':', 1)
-        key = key.lower().strip().replace('-', '_')
-        value = value.strip()
+      if line.startswith(b'x-wget-at-'):
+        key, value = line.split(b'-', 3)[-1].split(b':', 1)
+        key = key.lower().strip().replace(b'-', b'_').decode("utf-8")
+        value = value.strip().decode("utf-8")
         if key not in metadata:
           metadata[key] = []
         metadata[key].append(value)
@@ -237,10 +234,10 @@ def read_metadata(stream, metadata):
 
 # check for gzip errors
 def test_gz(filename, offset, size, verbose=False, copy_to_file=None,
-            dict_file=None, read_stdout=True):
+            dict_file=None, read_stdout=True, compression_type=None):
   size_orig = size
   d_wget_at = {}
-  with open(filename, "r") as f_stream:
+  with open(filename, "rb") as f_stream:
     f = RangeFile(f_stream, offset, size)
     if verbose and size > 10 * 1024 * 1024:
       progress = ProgressInfo(-size)
@@ -250,54 +247,56 @@ def test_gz(filename, offset, size, verbose=False, copy_to_file=None,
       f = CopyReader(f, copy_to_file)
       start_pos = copy_to_file.tell()
     try:
-      with open("/dev/null", "w") as dev_null:
-        if filename.endswith('.gz'):
-          gz = subprocess.Popen(
-            ["gunzip"] + (["-tv"] if not read_stdout else []),
-            shell=False,
-            stdin=subprocess.PIPE,
-            stdout=dev_null if not read_stdout else subprocess.PIPE,
-            stderr=dev_null
-          )
-        if filename.endswith('.zst'):
-          gz = subprocess.Popen(
-            ["zstd", "-d"]
-              + (["-D", dict_file.name] if dict_file else [])
-              + (["--test"] if not read_stdout else []),
-            shell=False,
-            stdin=subprocess.PIPE,
-            stdout=dev_null if not read_stdout else subprocess.PIPE,
-            stderr=dev_null
-          )
-        if read_stdout:
-          thread = threading.Thread(
-            target=read_metadata,
-            args=(gz.stdout, d_wget_at)
-          )
-          thread.daemon = True
-          thread.start()
-        while True:
-          buf = f.read(4096)
-          size -= len(buf)
-          if progress:
-            progress.update(-size)
-          if len(buf) > 0:
-            gz.stdin.write(buf)
-          else:
-            break
-        gz.stdin.close()
-        ret = gz.wait()
-        if read_stdout:
-          thread.join()
-        if ret != 0:
-          raise IOError("Could not decompress warc.gz, returned %d." % ret)
+      gz = None
+      if filename.endswith('.gz') or compression_type == "gz":
+        gz = subprocess.Popen(
+          ["gunzip"] + (["-tv"] if not read_stdout else []),
+          shell=False,
+          stdin=subprocess.PIPE,
+          stdout=subprocess.DEVNULL if not read_stdout else subprocess.PIPE,
+          stderr=subprocess.DEVNULL
+        )
+      if filename.endswith('.zst') or compression_type == "zst":
+        gz = subprocess.Popen(
+          ["zstd", "-d"]
+            + (["-D", dict_file.name] if dict_file else [])
+            + (["--test"] if not read_stdout else []),
+          shell=False,
+          stdin=subprocess.PIPE,
+          stdout=subprocess.DEVNULL if not read_stdout else subprocess.PIPE,
+          stderr=subprocess.DEVNULL
+        )
+      if gz is None:
+        raise Exception(f"Could not find a decompression program for {filename}")
+      if read_stdout:
+        thread = threading.Thread(
+          target=read_metadata,
+          args=(gz.stdout, d_wget_at)
+        )
+        thread.daemon = True
+        thread.start()
+      while True:
+        buf = f.read(4096)
+        size -= len(buf)
         if progress:
-          progress.clear()
+          progress.update(-size)
+        if len(buf) > 0:
+          gz.stdin.write(buf)
+        else:
+          break
+      gz.stdin.close()
+      ret = gz.wait()
+      if read_stdout:
+        thread.join()
+      if ret != 0:
+        raise IOError(f"Could not decompress warc.gz, returned {ret:d}.")
+      if progress:
+        progress.clear()
     except (IOError, OSError) as e:
       if progress:
         progress.clear()
       if verbose:
-        print >>sys.stderr, e
+        print(f"Compressed file did not pass decompression: {e}", file=sys.stderr)
       if copy_to_file:
         copy_to_file.truncate(start_pos)
         copy_to_file.seek(start_pos)
@@ -328,14 +327,14 @@ class MegawarcBuilder(object):
 
             padding = (tarfile.RECORDSIZE - tar_out.tell()) % tarfile.RECORDSIZE
             if padding > 0:
-              tar_out.write("\0" * padding)
+              tar_out.write(b"\0" * padding)
           finally:
             tar.close()
         finally:
           json_out.close()
 
   def process_entry(self, entry, warc_out, tar_out, json_out):
-    with open(self.input_filename, "r") as tar:
+    with open(self.input_filename, "rb") as tar:
       tar.seek(entry.offset)
       tar_header = tar.read(entry.offset_data - entry.offset)
 
@@ -355,18 +354,18 @@ class MegawarcBuilder(object):
     if entry.isfile() and re.search(r"\.warc\.gz", entry.name):
       # this is a .warc.gz
       if self.verbose:
-        print >>sys.stderr, "Checking %s" % entry.name
+        print(f"Checking {entry.name}", file=sys.stderr)
       # add to megawarc while copying to the megawarc.warc.gz
       warc_offset = warc_out.tell()
-      valid_warc_gz = test_gz(self.input_filename, entry.offset_data, entry.size,
-                              copy_to_file=warc_out, verbose=self.verbose)
+      valid_warc_gz, wget_at = test_gz(self.input_filename, entry.offset_data, entry.size,
+                              copy_to_file=warc_out, verbose=self.verbose, compression_type="gz")
 
     # save in megawarc or in tar
     d_target = OrderedDict()
     if valid_warc_gz:
       # a warc file.gz, add to megawarc
       if self.verbose:
-        print >>sys.stderr, "Copied %s to warc" % entry.name
+        print(f"Copied {entry.name} to warc", file=sys.stderr)
 
       d_target["container"] = "warc"
       d_target["offset"] = warc_offset
@@ -376,7 +375,7 @@ class MegawarcBuilder(object):
       # not a warc.gz file, add to tar
       tar_offset = tar_out.tell()
       if self.verbose:
-        print >>sys.stderr, "Copying %s to tar" % entry.name
+        print(f"Copying {entry.name} to tar", file=sys.stderr)
       copy_to_stream(tar_out, self.input_filename, entry.offset, block_size)
 
       d_target["container"] = "tar"
@@ -387,12 +386,14 @@ class MegawarcBuilder(object):
     d = OrderedDict()
     d["target"] = d_target
     d["src_offsets"] = d_src_offsets
-    d["header_fields"] = entry.get_info("utf-8", {})
-    d["header_base64"] = base64.b64encode(tar_header)
+    d["header_fields"] = entry.get_info()
+    d["header_fields"]["type"] = d["header_fields"]["type"].decode("utf-8")
+    d["header_base64"] = base64.b64encode(tar_header).decode("utf-8")
 
     # store metadata
-    json.dump(d, json_out, separators=(',', ':'))
-    json_out.write("\n")
+    json_data = json.dumps(d, separators=(',', ':'))
+    json_out.write(json_data.encode("utf-8"))
+    json_out.write(b"\n")
 
 
 def init_zst_megawarc(out, project, dict_id, dict_server):
@@ -405,7 +406,7 @@ def init_zst_megawarc(out, project, dict_id, dict_server):
     except KeyboardInterrupt:
       raise
     except Exception as e:
-      print >>sys.stderr, "Failed to contact API, got %s" % str(e)
+      print(f"Failed to contact API, got {e}", file=sys.stderr)
       time.sleep(1)
       continue
     break
@@ -418,7 +419,7 @@ def init_zst_megawarc(out, project, dict_id, dict_server):
     except KeyboardInterrupt:
       raise
     except Exception as e:
-      print >>sys.stderr, "Failed to download dictionary, got %s" % str(e)
+      print(f"Failed to download dictionary, got {e}", file=sys.stderr)
       time.sleep(1)
       continue
     break
@@ -440,6 +441,7 @@ def init_zst_megawarc(out, project, dict_id, dict_server):
 class MegawarcPacker(object):
   def __init__(self, output_basename):
     self.verbose = False
+    self.deterministic = False
     self.dict_server = None
     self.dictionary_server = None
     self.output_basename = output_basename
@@ -451,15 +453,15 @@ class MegawarcPacker(object):
 
   def process(self, filelist):
     try:
-      def each_file(arg, dirname, names):
-        for n in names:
-          n = os.path.join(dirname, n)
-          if os.path.isfile(n):
-            self.process_file(n)
-
       for filename in filelist:
         if os.path.isdir(filename):
-          os.path.walk(filename, each_file, None)
+          for dirname, _, names in os.walk(filename):
+            if self.deterministic:
+                names = sorted(names)
+            for n in names:
+              n = os.path.join(dirname, n)
+              if os.path.isfile(n):
+                self.process_file(n)
         elif os.path.isfile(filename):
           self.process_file(filename)
 
@@ -469,7 +471,7 @@ class MegawarcPacker(object):
           if f["file"].name.endswith('.tar'):
             padding = (tarfile.RECORDSIZE - f["file"].tell()) % tarfile.RECORDSIZE
             if padding > 0:
-              f["file"].write("\0" * padding)
+              f["file"].write(b"\0" * padding)
           f["file"].close()
 
   def process_file(self, filename):
@@ -529,7 +531,7 @@ class MegawarcPacker(object):
     entry.mtime = statres.st_mtime
     entry.type = tarfile.REGTYPE
 
-    tar_header = entry.tobuf()
+    tar_header = entry.tobuf(tarfile.GNU_FORMAT)
 
     # find position in imaginary tar
     entry.offset = tar_out["pos"]
@@ -554,7 +556,7 @@ class MegawarcPacker(object):
     valid_warc_gz = False
     if re.search(r"\.warc\.(?:gz|zst)$", filename):
       if self.verbose:
-        print >>sys.stderr, "Checking %s" % filename
+        print(f"Checking {filename}", file=sys.stderr)
       warc_offset = warc_out.tell()
       if dict_id is not None:
         valid_warc_gz, d_wget_at = test_gz(
@@ -571,7 +573,7 @@ class MegawarcPacker(object):
     if valid_warc_gz:
       # a warc file.gz, add to megawarc
       if self.verbose:
-        print >>sys.stderr, "Copied %s to warc" % filename
+        print(f"Copied {filename} to warc", file=sys.stderr)
 
       d_target["container"] = "warc"
       d_target["offset"] = warc_offset
@@ -581,12 +583,12 @@ class MegawarcPacker(object):
       # not a warc.gz file, add to tar
       tar_offset = tar_out["file"].tell()
       if self.verbose:
-        print >>sys.stderr, "Copying %s to tar" % filename
+        print(f"Copying {filename} to tar", file=sys.stderr)
       tar_out["file"].write(tar_header)
       copy_to_stream(tar_out["file"], filename, 0, entry.size)
       padding = (tarfile.BLOCKSIZE - entry.size) % tarfile.BLOCKSIZE
       if padding > 0:
-        tar_out["file"].write("\0" * padding)
+        tar_out["file"].write(b"\0" * padding)
 
       d_target["container"] = "tar"
       d_target["offset"] = tar_offset
@@ -596,13 +598,15 @@ class MegawarcPacker(object):
     d = OrderedDict()
     d["target"] = d_target
     d["src_offsets"] = d_src_offsets
-    d["header_fields"] = entry.get_info("utf-8", {})
-    d["header_base64"] = base64.b64encode(tar_header)
+    d["header_fields"] = entry.get_info()
+    d["header_fields"]["type"] = d["header_fields"]["type"].decode("utf-8")
+    d["header_base64"] = base64.b64encode(tar_header).decode("utf-8")
     d["wget_at"] = d_wget_at
 
     # store metadata
-    json.dump(d, json_out, separators=(',', ':'))
-    json_out.write("\n")
+    json_data = json.dumps(d, separators=(',', ':'))
+    json_out.write(json_data.encode("utf-8"))
+    json_out.write(b"\n")
 
 
 # recreate the original .tar from a megawarc tar+warc+json
@@ -624,7 +628,7 @@ class MegawarcRestorer(object):
 
         padding = (tarfile.RECORDSIZE - tar_out.tell()) % tarfile.RECORDSIZE
         if padding > 0:
-          tar_out.write("\0" * padding)
+          tar_out.write(b"\0" * padding)
     finally:
       json_in.close()
 
@@ -632,7 +636,7 @@ class MegawarcRestorer(object):
   def process_entry(self, entry, tar_out):
     if entry["target"]["container"] == "warc":
       if self.verbose:
-        print >>sys.stderr, "Copying %s from warc" % entry["header_fields"]["name"]
+        print(f"Copying {entry['header_fields']['name']} from warc", file=sys.stderr)
       if "header_base64" in entry:
         tar_out.write(base64.b64decode(entry["header_base64"]))
       elif "header_string" in entry:
@@ -643,16 +647,16 @@ class MegawarcRestorer(object):
                      entry["target"]["offset"], entry["target"]["size"])
       padding = (tarfile.BLOCKSIZE - entry["target"]["size"]) % tarfile.BLOCKSIZE
       if padding > 0:
-        tar_out.write("\0" * padding)
+        tar_out.write(b"\0" * padding)
 
     elif entry["target"]["container"] == "tar":
       if self.verbose:
-        print >>sys.stderr, "Copying %s from tar" % entry["header_fields"]["name"]
+        print(f"Copying {entry['header_fields']['name']} from tar", file=sys.stderr)
       copy_to_stream(tar_out, self.input_tar_filename,
                      entry["target"]["offset"], entry["target"]["size"])
       padding = (tarfile.BLOCKSIZE - entry["target"]["size"]) % tarfile.BLOCKSIZE
       if padding > 0:
-        tar_out.write("\0" * padding)
+        tar_out.write(b"\0" * padding)
 
     else:
       raise Exception("Unkown container: %s for %s" %
@@ -674,6 +678,9 @@ Use  %prog restore FILE  to reconstruct original tar.
   parser.add_option("-v", "--verbose", dest="verbose",
                     action="store_true",
                     help="print status messages", default=False)
+  parser.add_option("--deterministic", dest="deterministic",
+                    action="store_true",
+                    help="Sorts file listing of directories before adding so files are processed in the same order", default=False)
   parser.add_option("-s", "--server", dest="server", type=str,
                     help="server for ZST dictionaries", default=None)
   (options, args) = parser.parse_args()
@@ -684,7 +691,7 @@ Use  %prog restore FILE  to reconstruct original tar.
 
   if args[0] == "convert":
     if not os.path.exists(args[1]):
-      print >>sys.stderr, "Input file %s does not exist." % args[1]
+      print(f"Input file {args[1]} does not exist.", file=sys.stderr)
       exit(1)
 
     try:
@@ -701,6 +708,7 @@ Use  %prog restore FILE  to reconstruct original tar.
     try:
       mwb = MegawarcPacker(args[1])
       mwb.verbose = options.verbose
+      mwb.deterministic = options.deterministic
       mwb.dict_server = options.server
       mwb.process(args[2:])
     except:
@@ -717,10 +725,10 @@ Use  %prog restore FILE  to reconstruct original tar.
   elif args[0] == "restore":
     for ext in (".megawarc.warc.gz", ".megawarc.json.gz"):
       if not os.path.exists(args[1]+ext):
-        print >>sys.stderr, "Input file %s does not exist." % (args[1] + ext)
+        print(f"Input file {args[1] + ext} does not exist.", file=sys.stderr)
         exit(1)
     if os.path.exists(args[1]):
-      print >>sys.stderr, "Outputfile %s already exists." % args[1]
+      print(f"Outputfile {args[1]} already exists.", file=sys.stderr)
       exit(1)
 
     try:
